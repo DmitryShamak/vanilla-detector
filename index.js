@@ -8,126 +8,101 @@ var Q = require("q");
 
 var argv = require("minimist")(process.argv.slice(2), {
 	alias: {
-		userId: "id"
+		userId: "id",
+		level: "lvl",
+		limit: "lim"
 	}
 });
 
-function VanillaDetector() {
-	var self = this;
+var findFriends = function (id, currLevel, callback) {
+	var url = "https://api.vk.com/method/friends.get?user_id=" + id + "&v=5.29";
 
-	self.setRequest = function (url, cb) {
-		request({
-			url: url
-		}, function (err, res, data) {
-			console.log(data);
-		});
-	};
-
-	self.getData = function (file, callback) {
-		fs.readFile("./vanilla-detector/test_data/" + file, function (err, data) {
-			callback(err, data);
-		});
-	};
-
-	self.getSongsByAuthor = function (id, author, cb) {
-		/*var url = "https://api.vk.com/method/audio.get";
-
-		url = "https://vk.com/dev?act=a_run_method&al=1&hash=1428052806%3Ac18a9ce691922268c9&method=users.getFollowers&param_count=2&param_fields=photo_50&param_user_id=85059589&param_v=5.29";
-
-		request({
-			url: url,
-			method: "POST",
-			header: { 'Content-Type': 'application/x-www-form-urlencoded' }
-		}, function (err, res, data) {
-			console.dir(data.response);
-		});
-
-		self.setRequest(url, cb);*/
+	request(url, function (err, response, body) {
+		if (err) {
+			return callback(err, null);
+		}
 
 
-	};
+		items = JSON.parse(body);
 
-	self.getProfileById = function (id, cb) {
-		var url = "https://vk.com/id" + id;
+		if (!items.error) {
+			items = items.response.items;
 
-		self.setRequest(url, cb);
-	};
+			var length = items.length;
 
-	self.getFriendsOfFriends = function (arr, deep) {
-		var promises = [];
+			console.log("Found %d friends", length);
+			setUserToList(id, length);
 
-		console.log("getFriendsOfFriends: ", arr, deep);
+			items = items.slice(0, 5);
+			if (currLevel > 0 && items.length) {
+				--currLevel;
 
-		arr.forEach(function(elem, ind) {
-			promises.push(self.getFriendsList(elem));
-		});
-
-		var friendsList = null;
-
-		var q = Q.all(
-			promises
-		).then(function (results) {
-			console.log("results: ", results[0]);
-
-			friendsList = results[0];
-
-			if (deep <= 0 || !arr || !arr.length) {
-				console.log("return friends");
-				return Promise.resolve(results[0]);
-			}
-
-			console.log("start new deep");
-			return self.getFriendsOfFriends(results[0], --deep);
-		});
-	};
-
-	self.getFriendsList = function (profile) {
-		//find all friends
-		var deferred = Q.defer();
-		
-		setTimeout(function () {
-			// setTimeout to resolve the deferred, which will trigger the fulfillment handler of the promise.
-			if (profile.friends && profile.friends.length) {
-				deferred.resolve(profile.friends);
+				items.forEach(function (item) {
+					findFriends(item, currLevel, callback);
+				});
 			} else {
-				deferred.resolve(false);
+				callback(null, items);
 			}
-		}, 100);
-		// return the promise of the deferred.
-		return deferred.promise;
-	};
-
-	self.getTopByValue = function (arr, volue, limit, cb) {
-		var resArr = [];
-
-		var maxValue = arr[0][value],
-			minValue = null;
-
-		arr.forEach(function(elem, ind) {
-			//push to resArr position
-		});
-
-		return resArr.slice(0, limit)
-	};
-
-	self.startSearch = function (userId, author, depthLimit, topLimit, callback) {
-		//get af user friends list by depthLimit
-		var allFriendsOfTarget = null;
-
-		Q.all([self.getFriendsList(userId)]).then(function (resolve) {
-			self.getFriendsOfFriends(resolve, depthLimit)
-			.then(function (resolve) {
-				allFriendsOfTarget = resolve;
-				console.log("allFriendsOfTarget: ", allFriendsOfTarget);
-			});
-		});
-
-		//get all songs in users list by author
-
-		//get topLimit users with audio length
-	};
+		} else {
+			var error = items.error.error_msg;
+			console.log(error);
+			callback(error, null);
+		}
+	});
 };
 
-var vanillaDetector = new VanillaDetector();
+var findProfileAudio = function (id, callback) {
 
-module.exports = vanillaDetector;
+};
+
+var getProfileFullName = function(id) {
+	var url = "https://api.vk.com/method/users.get?fields=bdate&user_id=" + id + "&v=5.29";
+	var deferred = Q.defer();
+	request(url, function (err, response, body) {
+		if (err) {
+			return deferred.resolve("Anonymus");
+		}
+
+
+		//HOW TO SET RUS SYMBOLS HEADER???
+		body = JSON.parse(body).response[0];
+		var fullName = body.first_name + " " + body.last_name;
+
+		deferred.resolve(fullName);
+	});
+
+	return deferred.promise;
+};
+
+var getTopByLimit = function (arr, limit) {
+	return arr.sort().slice(-limit);
+};
+
+var topList = [];
+
+var setUserToList = function (id, friends) {
+	topList.push({
+		userId: id,
+		friends: friends
+	});
+};
+
+var detectVanilla = function (targetId, levels, limit, callback) {
+	findFriends(targetId, levels, function (err, friends) {
+		if (err) {
+			return console.log(err);
+		}
+
+		if (friends) {
+			Q.all(
+				friends.map(getProfileFullName)
+			).then(function (res) {
+				res.forEach(function (item) {
+					console.log("FullName: %s", item);
+				});
+			});
+		}
+	});
+};
+
+module.exports.detectVanilla = detectVanilla;
