@@ -8,9 +8,9 @@
     "request": "",
     "mime": "",
     "fs": "",
-	"unique-concat": "",
-	"q": "",
-	"minimist": ""
+    "cheerio": "",
+    "q": "",
+    "minimist": ""
   },
   "devDependencies": {},
   "author": "Dmitry",
