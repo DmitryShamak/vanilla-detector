@@ -4,105 +4,124 @@ var mime = require("mime");
 
 var fs = require("fs");
 
-var Q = require("q");
+var Promise = require("bluebird");
 
 var argv = require("minimist")(process.argv.slice(2), {
 	alias: {
-		userId: "id",
-		level: "lvl",
-		limit: "lim"
+		userId: "id"
 	}
 });
 
-var findFriends = function (id, currLevel, callback) {
+var getSettledData = function(data) {
+	data = data.map(function(item) {
+		return item._settledValue;
+	});
+	data = [].concat.apply([], data);
+
+	return data;
+};
+
+var getProfileFriends = function(id, resolver) {
 	var url = "https://api.vk.com/method/friends.get?user_id=" + id + "&v=5.29";
 
 	request(url, function (err, response, body) {
 		if (err) {
-			return callback(err, null);
+			return resolver.reject(err);
 		}
 
 
-		items = JSON.parse(body);
+		var items = JSON.parse(body);
 
-		if (!items.error) {
-			items = items.response.items;
+		//return only 5 friends for easy test
+		var friends = items.response.items.slice(0, 6);
 
-			var length = items.length;
-
-			console.log("Found %d friends", length);
-			setUserToList(id, length);
-
-			items = items.slice(0, 5);
-			if (currLevel > 0 && items.length) {
-				--currLevel;
-
-				items.forEach(function (item) {
-					findFriends(item, currLevel, callback);
-				});
-			} else {
-				callback(null, items);
-			}
-		} else {
-			var error = items.error.error_msg;
-			console.log(error);
-			callback(error, null);
-		}
+		resolver.resolve(friends);
 	});
 };
 
-var findProfileAudio = function (id, callback) {
+var crawlFriends = function(friends, level, resolver) {
+	var resolver = Promise.pending();
 
+	console.log("start crawl", friends, level);
+
+	if(level > 0) {
+		var promises = friends.map(function(id) {
+			var innerResolver = Promise.pending();
+			
+			getProfileFriends(id, innerResolver);
+
+			return innerResolver.promise;
+		});
+
+		Promise.settle(promises).then(function(res) {
+			resolver.resolve(res);
+			//need to go deeper --level
+		});
+	}
+
+	return resolver.promise;
 };
 
-var getProfileFullName = function(id) {
-	var url = "https://api.vk.com/method/users.get?fields=bdate&user_id=" + id + "&v=5.29";
-	var deferred = Q.defer();
-	request(url, function (err, response, body) {
+var getProfileFollowers = function(id, author, resolver) {
+	var url = "https://api.vk.com/method/users.getFollowers?user_id=" + id + "&v=5.29";
+
+	request(url, function (err, response, body) { //get followers -> change to get audio in future
 		if (err) {
-			return deferred.resolve("Anonymus");
+			return resolver.reject(err);
 		}
+		
+		body = JSON.parse(body).response;
+		var result = {id: id, count: body.count};
 
-
-		//HOW TO SET RUS SYMBOLS HEADER???
-		body = JSON.parse(body).response[0];
-		var fullName = body.first_name + " " + body.last_name;
-
-		deferred.resolve(fullName);
-	});
-
-	return deferred.promise;
-};
-
-var getTopByLimit = function (arr, limit) {
-	return arr.sort().slice(-limit);
-};
-
-var topList = [];
-
-var setUserToList = function (id, friends) {
-	topList.push({
-		userId: id,
-		friends: friends
+		resolver.resolve(result);
 	});
 };
 
-var detectVanilla = function (targetId, levels, limit, callback) {
-	findFriends(targetId, levels, function (err, friends) {
-		if (err) {
-			return console.log(err);
-		}
+var findAudios = function(userList, author) {
+	var resolver = Promise.pending();
 
-		if (friends) {
-			Q.all(
-				friends.map(getProfileFullName)
-			).then(function (res) {
-				res.forEach(function (item) {
-					console.log("FullName: %s", item);
-				});
-			});
-		}
+	userList = getSettledData(userList);
+
+	var promises = userList.map(function(id) {
+		var innerResolver = Promise.pending();
+		
+		getProfileFollowers(id, author, innerResolver);
+
+		return innerResolver.promise;
+	});
+
+	Promise.settle(promises).then(function(res) {
+		resolver.resolve(res);
+	});	
+
+	return resolver.promise;
+};
+
+var compare = function(a,b) {
+	var key = "count";
+
+	if (a[key] < b[key]) {
+		return -1;
+	}
+	if (a[key] > b[key]) {
+		return 1;
+	}
+
+	return 0;
+}
+
+var getTopList = function(list, limit) {
+	return list.sort(compare).reverse().slice(0, ++limit);
+};
+
+var startDetecting = function(id, author, level, callback) { //userId, media author, how deep we will search by friends, callback after all done  
+	crawlFriends([id], level).then(function(res) {
+		return findAudios(res, author);
+	}).then(function(res) {
+		res = getSettledData(res);
+
+		callback(null, getTopList(res, 3));
 	});
 };
 
-module.exports.detectVanilla = detectVanilla;
+module.exports.startDetecting = startDetecting;
