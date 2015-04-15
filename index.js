@@ -32,15 +32,11 @@ var getProfileFriends = function(id) {
 		}
 
 		var items = JSON.parse(body);
-
-		//return only 3 friends for easy test
 		if(items.error) {
 			return resolver.reject(items.error);
 		}
 
-		var max = 3;
-		var friends = items.response.items.slice(0, max);
-
+		var friends = items.response.items;
 		resolver.resolve(friends);
 	});
 
